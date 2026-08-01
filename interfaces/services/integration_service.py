@@ -62,6 +62,9 @@ class IntegratedMemoryService:
             携带向量与（若 LMS 回填）熵/惊讶度的 MemoryItem。
         """
         item = MemoryItem(text=text, origin=source, system="integration")
+        if not item.id:
+            import uuid
+            item.id = uuid.uuid4().hex
 
         if self.vector is not None:
             try:
