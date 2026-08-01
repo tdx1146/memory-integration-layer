@@ -28,13 +28,47 @@ interfaces/
 ├── models.py                    # 数据模型 (MemoryItem / CognitiveState / ContributionResult)
 ├── exceptions.py                # 异常体系 (统一降级)
 ├── registry.py                  # ★ 依赖注入容器
-├── adapters/                    # 现有系统适配器
+├── adapters/                    # ★ 后端层：把现有系统翻译成标准 Port（只做单点翻译）
 │   ├── sensor_qdrant.py         # Qdrant 向量服务
 │   ├── sensor_http.py           # HTTP 嵌入服务 (bge-m3)
-│   ├── cognitive_lms.py         # LMS (隐式记忆 + 状态)
-│   ├── cognitive_sandglass.py   # 沙漏 (显式记忆)
-│   └── application_monument.py  # 丰碑网络
+│   ├── cognitive_lms.py         # LMS 认知门面 (组合/降级)
+│   ├── cognitive_sandglass.py   # 沙漏认知门面 (组合/降级)
+│   ├── application_monument.py  # 丰碑应用门面
+│   ├── sandglass_adapter.py     # 沙漏真实后端 (SQLite)
+│   ├── lms_adapter.py           # LMS 真实后端 (HTTP) + parse_lms_context
+│   ├── vector_adapter.py        # 向量真实后端 (OpenAI 兼容 /embeddings)
+│   ├── monument_adapter.py      # 丰碑真实后端 (MonumentCore)
+│   └── real_backends.py         # [Legacy 兼容别名层，仅转发]
+├── services/                    # ★ 前端层：业务编排（跨 Port 聚合，不接触具体适配器）
+│   └── integration_service.py   # IntegratedMemoryService (聚合存储/协同检索/知识贡献)
 └── test_interfaces.py           # 单元测试 (pytest)
+```
+
+## 前后端分离
+
+- **`adapters/`（后端）** ：每个系统一个适配器，只做"翻译"，不含业务逻辑。
+- **`services/`（前端）** ：编排多个 Port 实现跨系统业务（协同检索加权融合、
+  聚合存储、从沙漏提炼知识贡献丰碑）。业务代码只依赖抽象 Port，不 import 具体适配器。
+
+```python
+from interfaces import Registry, MemoryItem
+from interfaces.services.integration_service import IntegratedMemoryService
+
+# 协同检索服务（用真实后端组合）
+from interfaces.adapters.sandglass_adapter import SandglassAdapter
+from interfaces.adapters.lms_adapter import LMSAdapter
+from interfaces.adapters.vector_adapter import VectorAdapter
+from interfaces.adapters.monument_adapter import MonumentAdapter
+
+svc = IntegratedMemoryService(
+    sandglass=SandglassAdapter("/path/sandglass.db"),
+    lms=LMSAdapter("http://localhost:8190"),
+    vector=VectorAdapter("http://192.168.0.103:11435/v1/embeddings"),
+    monument=MonumentAdapter(),
+)
+svc.store("用户确认修复完成", source="chat")
+hits = svc.recall("修复")      # 文本0.3+向量0.5+LMS激活0.2 加权融合
+svc.contribute("架构")        # 从沙漏召回提炼知识并贡献丰碑
 ```
 
 ## 快速上手
@@ -79,11 +113,12 @@ reg = Registry.in_memory()
 ## 换取与迁移
 
 - 新增系统 → 实现对应 Port 加一个适配器 + 注册到 `Registry`。
+- 新业务编排 → 加到 `services/`（前端层），只依赖抽象 Port。
 - 修改底层 → 只改该系统的适配器，业务代码零改动。
 - 运行测试：
 
 ```bash
-python3 -m pytest interfaces/test_interfaces.py -v
+python3 -m pytest interfaces/test_interfaces.py tests/ -v
 ```
 
 ## 三层接口契约速览
