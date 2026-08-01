@@ -13,8 +13,9 @@
 用法：
     from interfaces.registry import Registry
     reg = Registry.default()          # 组装所有真实适配器
-    sensor = reg.sensor.provider()
-    v = sensor.embed("你好")
+    v = reg.sensor.embed("你好")     # sensor/cognitive/application 为 @property，直接返回 Port
+    st = reg.cognitive.get_state()
+    reg.application.contribute("知识")
 """
 
 from interfaces.base import (

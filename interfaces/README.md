@@ -75,21 +75,22 @@ svc.contribute("架构")        # 从沙漏召回提炼知识并贡献丰碑
 
 ```python
 from interfaces import Registry, MemoryItem
+from interfaces.services.integration_service import IntegratedMemoryService
 
 # 生产组装（惰性连接真实系统，失败自动降级）
 reg = Registry.default()
 
 # 感官层
-vec = reg.sensor().embed("你好")          # -> [1024] float
+vec = reg.sensor.embed("你好")          # -> [1024] float
 
-# 认知层
-reg.cognitive().store(MemoryItem(text="记忆", system="lms"))
-hits  = reg.cognitive().recall("记忆", k=5)
-state = reg.cognitive().get_state()       # 熵/惊讶度/目的性
+# 认知层（sensor/cognitive/application 均为 @property，直接返回 Port 实例）
+reg.cognitive.store(MemoryItem(text="记忆", system="lms"))
+hits  = reg.cognitive.recall("记忆", k=5)
+state = reg.cognitive.get_state()       # 熵/惊讶度/目的性
 
 # 应用层
-reg.application().contribute("某条知识", tags=["architecture"])
-urns = reg.application().sync_monuments()
+reg.application.contribute("某条知识", tags=["architecture"])
+urns = reg.application.sync_monuments()
 
 # 测试/离线用全内存版
 reg = Registry.in_memory()

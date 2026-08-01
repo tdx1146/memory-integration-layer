@@ -211,38 +211,40 @@ class TestApplicationAdapters:
 # ===========================================================================
 class TestRegistry:
     def test_in_memory_registry_end_to_end(self):
+        # 注意：Registry.sensor/cognitive/application 是 @property，
+        # 返回 Port 实例本身（非调用提供者），故直接属性访问即可。
         reg = Registry.in_memory()
-        vec = reg.sensor().embed("你好")
+        vec = reg.sensor.embed("你好")
         assert len(vec) == 1024
-        assert reg.cognitive().store(MemoryItem(text="记忆", system="t")) is True
-        assert len(reg.cognitive().recall("记忆")) >= 1
-        assert reg.cognitive().get_state().memory_count >= 1
-        res = reg.application().contribute("应用层知识")
+        assert reg.cognitive.store(MemoryItem(text="记忆", system="t")) is True
+        assert len(reg.cognitive.recall("记忆")) >= 1
+        assert reg.cognitive.get_state().memory_count >= 1
+        res = reg.application.contribute("应用层知识")
         assert res.ok is True
 
     def test_sensor_cognitive_application_are_ports(self):
         reg = Registry.in_memory()
-        assert isinstance(reg.sensor(), SensorPort)
-        assert isinstance(reg.cognitive(), CognitivePort)
-        assert isinstance(reg.application(), ApplicationPort)
+        assert isinstance(reg.sensor, SensorPort)
+        assert isinstance(reg.cognitive, CognitivePort)
+        assert isinstance(reg.application, ApplicationPort)
 
     def test_unconfigured_provider_raises(self):
         reg = Registry()
         with pytest.raises(InterfaceError):
-            reg.sensor()
+            reg.sensor
 
     def test_wrong_type_raises(self):
         reg = Registry(sensor_provider=lambda: "not-a-port")
         with pytest.raises(InterfaceError):
-            reg.sensor()
+            reg.sensor
 
     def test_caching_returns_same_instance(self):
         reg = Registry.in_memory()
-        assert reg.sensor() is reg.sensor()
+        assert reg.sensor is reg.sensor
 
     def test_with_sensor_replacement(self):
         reg = Registry.in_memory().with_sensor(lambda: DummySensor(dim=8))
-        assert reg.sensor().dim == 8
+        assert reg.sensor.dim == 8
 
 
 # ===========================================================================

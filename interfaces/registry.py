@@ -8,7 +8,7 @@
 
 用法：
     registry = Registry.default()            # 真实适配器（惰性连接）
-    cognition = registry.cognitive()          # CognitivePort
+    cognition = registry.cognitive           # CognitivePort（@property 直接取实例）
     state = cognition.get_state()
 
     # 全内存版（测试 / 离线）
