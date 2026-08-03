@@ -1,4 +1,93 @@
+# ══════════════════════════════════════════════
+# memory-integration-layer 仓库 .gitignore
+# 2026-08-03 整理：排除一切不应/不可提交的产物
+# ══════════════════════════════════════════════
+
+# --- Python 缓存/字节码 ---
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# --- 虚拟环境 ---
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- 模型文件（大体积，不入库） ---
+*.gguf
+*.bin
+*.onnx
+*.pt
+*.pth
+*.safetensors
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+
+# --- 备份/临时 ---
+*.bak
 *.bak_*
 *.bak-*
+*~.bak
+*.orig
+*.rej
+*.tmp
+*.swp
+*~
+*.old
+*.orig
+backups/
+tmp/
+tmp_*
+*.log
+logs/
+nohup.out
+
+# --- 密钥 / 敏感信息（绝不可提交） ---
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+id_rsa
+id_ed25519
+*.secret
+credentials.json
+service-account*.json
+ghp_*
+github_token*
+
+# --- 本地状态 / 运行产物 ---
+.locks/
+.openclaw/
+workspace_*.tar.gz
+openclaw-workspace-state.json
+silent-maintenance-last.txt
+dandan-mcp-server.mjs
+
+# --- 测试临时产物 ---
+test_write*.txt
+test_write*.py
+test_long_content.py
+
+# --- Qdrant / 向量数据 ---
+qdrant/
+storage/
+
+# --- 编辑器数据 ---
+.editor-backups/
