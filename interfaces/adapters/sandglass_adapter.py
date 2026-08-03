@@ -15,6 +15,7 @@ SQLite ``sandglass.db`` 直接翻译成 ``CognitivePort`` 的语义。
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import time
 from datetime import datetime
@@ -42,6 +43,10 @@ class SandglassAdapter(CognitivePort):
 
     实现 ``CognitivePort`` 的 store/recall/get_state，数据落盘到固定的
     SQLite 文件。默认路径为 openclaw 沙漏库；可注入便于测试与隔离。
+
+    注意：真实沙漏库存在两种 schema（历史遗留）——
+      主库列名为 ``timestamp``（旧），本地/插件库列名为 ``ts``（新）。
+    首次连接时自动探测实际列名并缓存，保证两类库都能读写。
     """
 
     def __init__(self, db_path: str, fallback: Optional[CognitivePort] = None):
@@ -49,13 +54,33 @@ class SandglassAdapter(CognitivePort):
         # 注入降级实现（默认内存版）；便于测试彻底离线时使用
         self._fallback = fallback or DummyCognitive()
         self._degraded = False
+        # 探测并缓存实际时间列名："ts" 或 "timestamp"
+        self._ts_col: Optional[str] = None
 
     # -- 底层访问（惰性建库） -----------------------------------------------
+    def _probe_ts_col(self, conn: "sqlite3.Connection") -> str:
+        """探测 sandglass 表的时间列名。优先 ts，退化到 timestamp。"""
+        if self._ts_col is not None:
+            return self._ts_col
+        try:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(sandglass)").fetchall()]
+        except Exception:  # pragma: no cover
+            cols = []
+        if "ts" in cols:
+            self._ts_col = "ts"
+        elif "timestamp" in cols:
+            self._ts_col = "timestamp"
+        else:  # pragma: no cover - 未知 schema
+            self._ts_col = "ts"
+        return self._ts_col
+
     def _connect(self) -> "sqlite3.Connection":
         """建立（并确保 schema 存在）的 SQLite 连接。失败抛 sqlite3.Error。"""
         try:
             conn = sqlite3.connect(self.db_path)
             conn.execute(_DDL)
+            # 建库后立刻探测列名，供后续读写使用
+            self._probe_ts_col(conn)
             return conn
         except Exception as e:  # pragma: no cover - 环境依赖
             self._degraded = True
@@ -79,9 +104,10 @@ class SandglassAdapter(CognitivePort):
     def store(self, memory: MemoryItem) -> bool:
         try:
             conn = self._connect()
+            ts_col = self._probe_ts_col(conn)
             cur = conn.cursor()
             cur.execute(
-                "INSERT INTO sandglass (ts, sender, text) VALUES (?, ?, ?)",
+                f"INSERT INTO sandglass ({ts_col}, sender, text) VALUES (?, ?, ?)",
                 (
                     self._from_ts(memory.created_at or time.time()),
                     memory.origin or memory.system or "agent",
@@ -102,14 +128,24 @@ class SandglassAdapter(CognitivePort):
         try:
             conn = self._connect()
             cur = conn.cursor()
+            ts_col = self._probe_ts_col(conn)
+            # 分词：拆成中文单字 / 字母数字串，任一命中即召回（更贴近真实模糊检索）
+            tokens = [
+                t for t in re.findall(r"[\u4e00-\u9fff]|[a-zA-Z0-9]+", query.lower())
+                if t.strip()
+            ]
+            if not tokens:
+                tokens = [query]
+            clauses = " OR ".join(["text LIKE ?"] * len(tokens))
+            params = [f"%{t}%" for t in tokens]
             cur.execute(
-                """
-                SELECT id, ts, sender, text FROM sandglass
-                WHERE text LIKE ?
-                ORDER BY ts DESC
+                f"""
+                SELECT id, {ts_col}, sender, text FROM sandglass
+                WHERE {clauses}
+                ORDER BY {ts_col} DESC
                 LIMIT ?
                 """,
-                (f"%{query}%", k),
+                (*params, k),
             )
             rows = cur.fetchall()
             conn.close()
