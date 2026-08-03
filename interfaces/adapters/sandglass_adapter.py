@@ -26,11 +26,11 @@ from interfaces.models import CognitiveState, MemoryItem
 
 logger = __import__("logging").getLogger(__name__)
 
-# 沙漏表 schema（OpenClaw sandglass 插件写入的固件）
+# 沙漏表 schema（与真实沙漏库一致：id/ts/sender/text，ts 为 %Y-%m-%d %H:%M:%S）
 _DDL = """
 CREATE TABLE IF NOT EXISTS sandglass (
     id INTEGER PRIMARY KEY,
-    timestamp TEXT,
+    ts TEXT,
     sender TEXT,
     text TEXT
 );
@@ -81,7 +81,7 @@ class SandglassAdapter(CognitivePort):
             conn = self._connect()
             cur = conn.cursor()
             cur.execute(
-                "INSERT INTO sandglass (timestamp, sender, text) VALUES (?, ?, ?)",
+                "INSERT INTO sandglass (ts, sender, text) VALUES (?, ?, ?)",
                 (
                     self._from_ts(memory.created_at or time.time()),
                     memory.origin or memory.system or "agent",
@@ -104,9 +104,9 @@ class SandglassAdapter(CognitivePort):
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT id, timestamp, sender, text FROM sandglass
+                SELECT id, ts, sender, text FROM sandglass
                 WHERE text LIKE ?
-                ORDER BY timestamp DESC
+                ORDER BY ts DESC
                 LIMIT ?
                 """,
                 (f"%{query}%", k),
