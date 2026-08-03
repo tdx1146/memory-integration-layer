@@ -22,6 +22,7 @@ from interfaces.adapters.sandglass_adapter import SandglassAdapter
 from interfaces.adapters.lms_adapter import LMSAdapter, parse_lms_context
 from interfaces.adapters.vector_adapter import VectorAdapter
 from interfaces.adapters.monument_adapter import MonumentAdapter
+from interfaces.adapters.doubt_adapter import DoubtAdapter, configure
 
 __all__ = [
     "QdrantSensorAdapter",
@@ -35,4 +36,7 @@ __all__ = [
     "parse_lms_context",
     "VectorAdapter",
     "MonumentAdapter",
+    # 自我怀疑账本（P1.2）
+    "DoubtAdapter",
+    "configure",
 ]
