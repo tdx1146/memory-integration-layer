@@ -91,3 +91,98 @@ storage/
 
 # --- 编辑器数据 ---
 .editor-backups/
+
+# ══════════════════════════════════════════════
+# AI 生命记忆（每个AI自己的生命，与代码无关，一概不 git）
+# ══════════════════════════════════════════════
+memory/
+
+# ══════════════════════════════════════════════
+# 独立子系统（各有自己的归属/仓库，不进入胶水层 repo）
+# ══════════════════════════════════════════════
+ai_group_chat/
+monument/
+元丰碑/
+找回自己/
+轻如烟/
+hunyuan/
+relay/
+deepseek-thinking/
+tessdata/
+
+# ══════════════════════════════════════════════
+# AI 身份/记忆/系统运行文档（属 AgentOS，不属胶水层 repo）
+# ══════════════════════════════════════════════
+SOUL.md
+IDENTITY.md
+USER.md
+AGENTS.md
+MEMORY.md
+BOOT.md
+BOOTSTRAP.md
+DREAMS.md
+HEARTBEAT.md
+TOOLS.md
+VERSION.md
+facts.dict.md
+knowledge-tree.md
+系统全图.md
+系统启动能力清单.md
+启动文件改造方案.md
+进度追踪.md
+session失忆修复审计报告.md
+2026-05-21
+深
+
+# ══════════════════════════════════════════════
+# 运行时/工具/其他项目脚本（非胶水层，不入库）
+# ══════════════════════════════════════════════
+code/
+core/
+edit/
+hooks/
+examples/
+analysis/
+my-scripts/
+docs/
+deploy_v2.0/
+scripts/
+models/
+dispatcher.py
+group_chat_api.py
+secretary_orchestrator.py
+message_flow.py
+summary_generator.py
+qdrant_client.py
+lightweight_recorder.py
+parse_markdown_tables.py
+docx_chapter_extract.py
+docx_numbering_xml_fix.py
+score_calculator.py
+serve-ai-group-chat.py
+test_integration.py
+test_lms_integration.sh
+deploy_audit_report.md
+deploy_openclaw_qh.sh
+deploy_script_audit.md
+weaponry-f6.md
+weaponry-f6-hunyuan.md
+
+# --- 工具/群聊文档 ---
+QDRANT_WRITE_USAGE.md
+README_GROUP_CHAT_API.md
+README_Qdrant.md
+Qdrant-CRUD-使用指南.md
+SECRETARY_500_WORD_CHANGES.md
+SUMMARY_GENERATOR_USAGE.md
+USAGE_SUMMARY_GENERATOR.md
+混合搜索体系说明.md
+AI群聊消息流集成指南.md
+AI群聊_资产清单.md
+AI群聊_技术文档/
+AI记忆集成研究-cognee-分析报告.md
+gateway-ws-protocol.md
+最终定稿.docx
+skills/
+models/
+tests/test_multi_network.py
