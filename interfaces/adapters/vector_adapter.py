@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional
 
 from interfaces.base import EMBEDDING_DIM, SensorPort
@@ -24,7 +25,9 @@ class VectorAdapter(SensorPort):
 
     def __init__(
         self,
-        api_url: str = "http://192.168.0.103:11435/v1/embeddings",
+        api_url: str = os.environ.get(
+            "VECTOR_URL", "http://192.168.0.103:11435/v1/embeddings"
+        ),
         model: str = "bge-m3",
         dim: int = EMBEDDING_DIM,
         timeout: float = 30.0,

@@ -30,6 +30,30 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+
+def _load_dotenv(path: str = os.path.join(HERE, ".env")):
+    """轻量 .env 加载器（零依赖，Phase 3 D4 新增）。
+
+    只读 SANDGLASS_SOURCE / NEXSANDBASE_HOME / LMS_URL / VECTOR_URL 四项；
+    已存在的环境变量优先（shell 显式导出 > .env），不覆盖。
+    必须在 import 任何读取环境变量的模块之前调用。
+    """
+    if not os.path.exists(path):
+        return
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+_load_dotenv()  # 必须在下方模块导入之前执行
+
 # 沙漏 txt 主数据目录（sandglass_vault 数据源）
 from interfaces.adapters.sandglass_vault_adapter import SANDGLASS_HOME
 
@@ -41,6 +65,7 @@ from urllib.parse import urlparse
 # LMS 活体记忆 HTTP 服务
 LMS_URL = os.environ.get("LMS_URL", "http://localhost:8190")
 # 向量服务（bge-m3，OpenAI 兼容 /embeddings）
+# Phase 3 D4：硬编码内网 IP 已改为读环境变量（.env / shell 均可覆盖）
 VECTOR_URL = os.environ.get(
     "VECTOR_URL", "http://192.168.0.103:11435/v1/embeddings"
 )
