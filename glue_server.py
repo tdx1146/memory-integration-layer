@@ -159,7 +159,12 @@ class GlueHandler(BaseHTTPRequestHandler):
                     }
                     for it in items
                 ]
-                self._send(200, {"query": query, "count": len(result), "results": result})
+                self._send(200, {
+                    "query": query,
+                    "count": len(result),
+                    "results": result,
+                    "self_ref": svc.get_self_ref_voice(),
+                })
 
             elif path == "/store":
                 text = body.get("text", "")

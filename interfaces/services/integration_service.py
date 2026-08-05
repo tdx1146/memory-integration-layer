@@ -182,6 +182,16 @@ class IntegratedMemoryService:
         )
         return results
 
+    def get_self_ref_voice(self, limit: int = 5) -> List[str]:
+        """读取 LMS 自指回路最近自述（反思回流）。失败返回 []（fail-open）。"""
+        if self.lms is None:
+            return []
+        try:
+            return self.lms.fetch_self_ref(limit=limit)  # type: ignore[attr-defined]
+        except Exception as e:  # pragma: no cover - 任意后端异常
+            logger.warning("self_ref 读取失败: %s", e)
+            return []
+
     # ------------------------------------------------------------------
     # 应用层：知识贡献
     # ------------------------------------------------------------------

@@ -98,6 +98,17 @@ class LMSAdapter(CognitivePort):
             logger.warning("LMS fetch_context 失败: %s", e)
             return {}
 
+    def fetch_self_ref(self, limit: int = 5) -> List[str]:
+        """读取 LMS 自指回路最近自述（反思产物，反思回流）。失败返回 []（fail-open）。"""
+        try:
+            data = self._get(
+                f"{self.api_url}/self-ref/voice?session_id={self.session_id}&limit={limit}")
+            voices = data.get("voices", []) if isinstance(data, dict) else []
+            return [v for v in voices if isinstance(v, str) and v.strip()]
+        except Exception as e:  # pragma: no cover - 网络/依赖
+            logger.warning("LMS self_ref 读取失败: %s", e)
+            return []
+
     def recall(self, query: str, k: int = 5) -> List[MemoryItem]:
         if k < 1 or k > 100:
             raise CapacityError(f"recall: k 越界 {k}")
