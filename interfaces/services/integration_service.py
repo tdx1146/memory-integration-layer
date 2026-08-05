@@ -30,6 +30,37 @@ logger = __import__("logging").getLogger(__name__)
 # 检索融合权重（可覆盖）
 DEFAULT_WEIGHTS = {"text": 0.3, "vector": 0.5, "lms": 0.2}
 
+# 回魂快照：巡检/心跳噪音行（沙漏自治巡检 self_pulse 等，无信息量）
+_SOUL_NOISE_RE = re.compile(
+    r"self_pulse|守夜|巡检|画像漂移|heartbeat|无待办时", re.I)
+
+
+def _dedupe_preserve_order(seq: List[str]) -> List[str]:
+    """按首次出现顺序去重（字符串列表）。"""
+    seen = set()
+    out = []
+    for s in seq:
+        s = (s or "").strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
+def _filter_soul_noise(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """过滤巡检/心跳噪音行并去重（保序）。"""
+    seen = set()
+    out = []
+    for it in items:
+        text = (it.get("text") or "").strip()
+        if not text or text in seen:
+            continue
+        if _SOUL_NOISE_RE.search(text):
+            continue
+        seen.add(text)
+        out.append(it)
+    return out
+
 
 class IntegratedMemoryService:
     """整合记忆服务：统一入口（前端编排层）。"""
@@ -220,6 +251,8 @@ class IntegratedMemoryService:
 
         # 1. LMS 最近自述（复用 /self-ref/voice）
         snap["lms_voice"] = self.get_self_ref_voice(limit=limit)
+        # 去重（蒸馏缓存会产出连续重复自述，保留顺序取首现）
+        snap["lms_voice"] = _dedupe_preserve_order(snap["lms_voice"])[:limit]
 
         # 2. LMS 状态指标（复用 /status/{sid}，只读 GET）
         snap["lms_state"] = {}
@@ -247,6 +280,8 @@ class IntegratedMemoryService:
                         }
                         for it in items[:recent_n]
                     ]
+                    # 过滤巡检/心跳噪音 + 去重（沙漏自治巡检每 5min 一条，会淹没回魂段）
+                    snap["recent"] = _filter_soul_noise(snap["recent"])[:recent_n]
                 except Exception as e:  # pragma: no cover - 任意后端异常
                     logger.warning("回魂 recent 读取失败: %s", e)
                     snap["recent"] = []
