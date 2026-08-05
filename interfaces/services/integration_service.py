@@ -75,7 +75,11 @@ class IntegratedMemoryService:
         ok_sandglass = True
         if self.sandglass is not None:
             ok_sandglass = bool(self.sandglass.store(item))
-        if self.lms is not None:
+        # 自述回写防御（反思回流，2026-08-05）：
+        # source=self_ref 的条目（自述入库）不得回注 LMS —— 否则每次入库都会
+        # 经 LMS /chat 触发新一轮反思 → 再蒸馏 → 再入库 → 死循环。
+        # 自述只落沙漏/向量（持久可检索），绝不喂回 LMS 塑形。
+        if self.lms is not None and item.origin != "self_ref":
             self.lms.store(item)
 
         if not ok_sandglass and self.vector is None and self.lms is None:

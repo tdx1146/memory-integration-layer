@@ -96,6 +96,23 @@ class TestIntegratedMemoryService:
         # 已写入沙漏：可由 recall 召回
         assert len(svc.recall("确认修复")) >= 1
 
+    def test_store_self_ref_source_skips_lms(self, svc):
+        """自述回写防御：source=self_ref 的条目不得回注 LMS。
+
+        否则每次入库都会经 LMS /chat 触发新一轮反思 → 再蒸馏 →
+        再入库 → 死循环。自述只落沙漏/向量，绝不喂回 LMS。
+        """
+        item = svc.store("我同时唤醒多条记忆，但关注方向稳定。",
+                         source="self_ref")
+        assert item.origin == "self_ref"
+        # 仍写入沙漏（持久可检索）
+        assert len(svc.recall("关注方向稳定")) >= 1
+        # 未回注 LMS：_FakeLMS.store 会回填 entropy，未调用则保持 None
+        assert item.entropy is None
+        # 对照：普通 chat 来源正常回注 LMS（entropy 被回填）
+        item2 = svc.store("普通对话内容", source="chat")
+        assert item2.entropy == 4.5
+
     def test_recall_weighted_merge(self, svc):
         svc.store("架构 设计 高内聚", source="agent")
         hits = svc.recall("架构", k=5)
