@@ -226,6 +226,17 @@ python3 -m pytest interfaces/test_interfaces.py tests/ --cov=interfaces --cov-re
 
 ---
 
+## 自我怀疑账本（doubt_adapter）
+
+胶水层内置**持续自我怀疑**（AgentOS 聪明机制）：`interfaces/adapters/doubt_adapter.py`
+把每次怀疑闭环写入 `doubt.db`（trigger: conflict/stakes/fok/surprise/novelty/user_correction），
+月度统计注入 persona。
+
+**总线接入（Phase 6）**：设置环境变量 `DOUBT_BUS_FILE`（指向 iso-sand 权威总线）后，
+`store_doubt()` 写入成功即发布 `doubt.episode` 事件（v1.1 契约）→ 消费者 lms.feed
+→ LMS /feed 塑形（自我怀疑喂潜意识）。默认不发布，fail-open。
+详细接入见 `Agent OS/DOUBT-SYSTEM.md`。
+
 ## 相关项目
 
 | 项目 | 说明 |

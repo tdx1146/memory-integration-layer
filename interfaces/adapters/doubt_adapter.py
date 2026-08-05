@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # 默认账本路径（规划文件清单：沙漏数据目录）
-DEFAULT_DB_PATH = "/vol1/@team/qh团队/QH/AI专用/所有自动化/轻如烟/sandglass/doubt.db"
+DEFAULT_DB_PATH = "/vol2/1000/AI专用/所有自动化/轻如烟/sandglass/doubt.db"
 
 # 枚举口径（与规划一致；SQLite CHECK 兜底把关）
 TRIGGER_TYPES = ("conflict", "stakes", "fok", "surprise", "novelty", "user_correction")
@@ -157,10 +157,16 @@ class DoubtAdapter:
 
         单条写入即提交，保证单写者语义下记录不丢；写失败不影响主流程。
         无论成功失败，连接都会在 finally 中安全关闭（避免残留写锁）。
+
+        总线发布：写入成功后，若环境变量 DOUBT_BUS_FILE 指向权威总线
+        （iso-sand/data/event_bus.jsonl），追加一条 v1.1 契约事件
+        doubt.episode（供 lms.feed 喂 LMS 塑形——"自我怀疑喂潜意识"）。
+        默认不发布（None）；本机部署在 .env 配置启用。发布失败静默降级。
         """
         conn = None
         try:
             row = _norm_episode(episode)
+            _publish_doubt_event(row)  # 总线发布（DOUBT_BUS_FILE 未设则 no-op）
             conn = self._connect()
             conn.execute(
                 """
@@ -403,6 +409,51 @@ def _shared_adapter() -> DoubtAdapter:
     if _shared is None:
         _shared = DoubtAdapter()
     return _shared
+
+
+def _publish_doubt_event(row: Dict[str, Any]) -> None:
+    """把怀疑闭环发布到权威事件总线（v1.1 契约，doubt.episode）。
+
+    - 仅当环境变量 DOUBT_BUS_FILE 设置时启用（默认 None=不发布）。
+    - 事件字段：schema_version/event_id/trace_id/t/event_type/producer/result/payload。
+    - fail-open：任何异常静默（不影响 doubt 账本写入）。
+    - 消费者：iso-sand lms.feed handler（订阅 doubt.episode → LMS /feed 塑形）。
+    """
+    import os as _os
+    import json as _json
+    import uuid as _uuid
+    import time as _time
+    bus_file = _os.environ.get("DOUBT_BUS_FILE")
+    if not bus_file:
+        return
+    try:
+        event = {
+            "schema_version": "1.1",
+            "event_id": str(_uuid.uuid4()),
+            "trace_id": f"doubt:{row.get('t', '')}",
+            "t": _time.strftime("%Y-%m-%dT%H:%M:%S+08:00"),
+            "event_type": "doubt.episode",
+            "producer": "interfaces.doubt",
+            "result": "OK",
+            "detail": f"怀疑闭环: {row.get('trigger_type', '')}",
+            "payload": {
+                "trigger_type": row.get("trigger_type"),
+                "suspicion": (row.get("suspicion") or "")[:200],
+                "user_reaction": row.get("user_reaction"),
+                "topic": (row.get("topic") or "")[:100],
+                "confidence_after": row.get("confidence_after"),
+            },
+        }
+        import fcntl
+        with open(bus_file, "a", encoding="utf-8") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            f.write(_json.dumps(event, ensure_ascii=False) + "\n")
+            f.flush()
+            import os as _os2
+            _os2.fsync(f.fileno())
+            fcntl.flock(f, fcntl.LOCK_UN)
+    except Exception:
+        pass  # fail-open：总线不可达不影响账本
 
 
 def store_doubt(episode_dict: Dict[str, Any]) -> bool:
