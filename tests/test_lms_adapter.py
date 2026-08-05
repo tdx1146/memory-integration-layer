@@ -17,7 +17,7 @@ from interfaces.exceptions import CapacityError
 from interfaces.models import MemoryItem
 
 
-def _make_adapter(chat_response=None, health_response=None, fail=False):
+def _make_adapter(chat_response=None, health_response=None, status_response=None, fail=False):
     """注入存根 HTTP 层的 LMSAdapter。"""
 
     def post(url, json):
@@ -30,6 +30,8 @@ def _make_adapter(chat_response=None, health_response=None, fail=False):
     def get(url):
         if fail:
             raise RuntimeError("network down")
+        if url.endswith("/status/main"):
+            return status_response or {}
         return health_response or {}
 
     return LMSAdapter(api_url="http://lms.test", http_post=post, http_get=get)
@@ -77,6 +79,36 @@ class TestLMSAdapter:
         adap = _make_adapter(fail=True)
         st = adap.get_state()  # 降级到 DummyCognitive，不抛错
         assert isinstance(st.memory_count, int)
+
+    def test_fetch_status_returns_metrics(self):
+        """回魂快照：/status/{sid} 返回状态指标子集（只读 GET）。"""
+        adap = _make_adapter(
+            status_response={
+                "session_id": "main",
+                "status": {
+                    "last_entropy": 5.25,
+                    "entropy_ratio": 0.947,
+                    "last_surprise": 0.113,
+                    "purpose_coherence": 0.92,
+                    "turn_count": 7,
+                    "num_nodes": 256,
+                    "precision_mean": 0.7,
+                    "self_ref_state": "normal",
+                    "irrelevant_extra": "x",
+                },
+            }
+        )
+        st = adap.fetch_status()
+        assert st["entropy_ratio"] == 0.947
+        assert st["last_surprise"] == 0.113
+        assert st["purpose_coherence"] == 0.92
+        assert st["turn_count"] == 7
+        assert "irrelevant_extra" not in st  # 只透传白名单指标
+
+    def test_fetch_status_network_fail_returns_empty(self):
+        """fail-open：/status 读不到返回 {}，不抛错。"""
+        adap = _make_adapter(fail=True)
+        assert adap.fetch_status() == {}
 
 
 class TestParseLMSContext:

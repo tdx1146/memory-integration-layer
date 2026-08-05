@@ -8,8 +8,9 @@
 沙漏**真实完整记忆**（约 3457 条），而非 SQLite 辅助库（906 条、且与
 sandglass_mcp 存在写锁冲突）。
 
-实现 ``CognitivePort`` 的 store/recall/get_state：
+实现 ``CognitivePort`` 的 store/recall/get_state（另加回魂快照专用 ``recent``）：
   - recall   -> 调 ``sandglass_vault.search()``（三层路由：影子沙→投石问路→mmap）
+  - recent   -> 调 ``sandglass_vault.recent()``（按时间倒序取最新，回魂快照用）
   - get_state-> 调 ``sandglass_vault.count()``
   - store    -> 追加一行到 ``sandglass.txt``（沙漏标准写入），并触发索引重建
 失败统一 fail-open（读失败返回 []，写失败返回 False）。
@@ -106,6 +107,34 @@ class SandglassVaultAdapter(CognitivePort):
             logger.warning("沙漏(vault)检索失败: %s", e)
             self._degraded = True
             return self._fallback.recall(query, k)
+
+    def recent(self, n: int = 5) -> List[MemoryItem]:
+        """最近 N 条记忆（按时间倒序，sandglass_vault.recent 原生能力）。
+
+        回魂快照用：不依赖语义召回，直接读沙漏 txt 尾部最新条目。
+        失败返回 []（fail-open）。
+        """
+        if n < 1 or n > 50:
+            raise CapacityError(f"recent: n 越界 {n}")
+        try:
+            vault = self._load_vault()
+            results = vault["recent"](n)
+            out: List[MemoryItem] = []
+            for line_no, ts, text in results:
+                out.append(
+                    MemoryItem(
+                        id=str(line_no),
+                        text=text or "",
+                        created_at=self._parse_ts(ts),
+                        origin="sandglass",
+                        system="sandglass",
+                    )
+                )
+            return out[:n]
+        except Exception as e:
+            logger.warning("沙漏(vault) recent 失败: %s", e)
+            self._degraded = True
+            return []
 
     def get_state(self) -> CognitiveState:
         try:

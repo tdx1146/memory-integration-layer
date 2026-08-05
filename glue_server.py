@@ -8,6 +8,7 @@
 
 统一入口（对应 service 方法）：
     POST /recall        协同检索（文本0.3 + 向量0.5 + LMS激活0.2 加权融合）
+    POST /soul          回魂快照（LMS自述+状态+沙漏最近记忆，只读fail-open防循环）
     POST /store         聚合写入（向量化 + 沙漏 + LMS）
     POST /status        各后端健康 + 记忆数聚合
     POST /contribute    从沙漏召回提炼知识贡献到丰碑
@@ -165,6 +166,13 @@ class GlueHandler(BaseHTTPRequestHandler):
                     "results": result,
                     "self_ref": svc.get_self_ref_voice(),
                 })
+
+            elif path == "/soul":
+                # 回魂快照：LMS 自述 + 状态 + 沙漏最近记忆（只读、fail-open、防循环）
+                limit = int(body.get("limit", 5) or 5)
+                recent_n = int(body.get("recent_n", 5) or 5)
+                snap = svc.get_soul_snapshot(limit=limit, recent_n=recent_n)
+                self._send(200, snap)
 
             elif path == "/store":
                 text = body.get("text", "")

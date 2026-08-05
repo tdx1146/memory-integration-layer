@@ -98,6 +98,29 @@ class LMSAdapter(CognitivePort):
             logger.warning("LMS fetch_context 失败: %s", e)
             return {}
 
+    def fetch_status(self) -> Dict[str, Any]:
+        """读取 LMS /status/{session_id} 状态指标（回魂快照用）。
+
+        只读 GET，不触发 /chat、不产生任何反思/回注。失败返回 {}（fail-open）。
+        """
+        keys = (
+            "last_entropy",
+            "entropy_ratio",
+            "last_surprise",
+            "purpose_coherence",
+            "turn_count",
+            "num_nodes",
+            "precision_mean",
+            "self_ref_state",
+        )
+        try:
+            data = self._get(f"{self.api_url}/status/{self.session_id}")
+            st = data.get("status", {}) if isinstance(data, dict) else {}
+            return {k: st[k] for k in keys if k in st}
+        except Exception as e:  # pragma: no cover - 网络/依赖
+            logger.warning("LMS status 读取失败: %s", e)
+            return {}
+
     def fetch_self_ref(self, limit: int = 5) -> List[str]:
         """读取 LMS 自指回路最近自述（反思产物，反思回流）。失败返回 []（fail-open）。"""
         try:

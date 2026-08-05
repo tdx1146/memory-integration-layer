@@ -77,3 +77,54 @@ class TestSandglassAdapter:
         fresh = SandglassAdapter(db_path)
         assert len(fresh.recall("持久化")) == 1
         assert fresh.get_state().memory_count == 1
+
+
+class TestSandglassVaultAdapterRecent:
+    """沙漏真实后端（vault txt 源）recent 能力 —— 回魂快照数据源。
+
+    离线单测：monkeypatch _load_vault 返回伪 vault，不依赖真实沙漏服务。
+    """
+
+    def test_recent_returns_latest_items(self, monkeypatch):
+        from interfaces.adapters.sandglass_vault_adapter import SandglassVaultAdapter
+
+        adap = SandglassVaultAdapter()
+
+        def fake_load():
+            return {
+                "recent": lambda n: [
+                    (3782, "2026-08-05 15:30:01", "最近一条"),
+                    (3781, "2026-08-05 15:20:01", "稍早一条"),
+                ][:n],
+            }
+
+        monkeypatch.setattr(adap, "_load_vault", fake_load)
+        items = adap.recent(2)
+        assert len(items) == 2
+        assert items[0].text == "最近一条"
+        assert items[0].origin == "sandglass"
+        assert items[0].id == "3782"
+        # 时间戳解析成功（2026-08-05 15:30:01 → epoch）
+        assert items[0].created_at and items[0].created_at > 0
+
+    def test_recent_n_out_of_range(self, monkeypatch):
+        from interfaces.exceptions import CapacityError
+        from interfaces.adapters.sandglass_vault_adapter import SandglassVaultAdapter
+
+        adap = SandglassVaultAdapter()
+        with pytest.raises(CapacityError):
+            adap.recent(0)
+        with pytest.raises(CapacityError):
+            adap.recent(51)
+
+    def test_recent_fail_open_on_backend_error(self, monkeypatch):
+        from interfaces.adapters.sandglass_vault_adapter import SandglassVaultAdapter
+
+        adap = SandglassVaultAdapter()
+
+        def boom():
+            raise RuntimeError("vault down")
+
+        monkeypatch.setattr(adap, "_load_vault", boom)
+        assert adap.recent(3) == []  # fail-open 不抛错
+        assert adap.degraded is True

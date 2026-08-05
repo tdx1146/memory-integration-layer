@@ -121,7 +121,7 @@ python3 glue_helper.py status
 
 ```bash
 python3 glue_server.py --port 19000 --host 127.0.0.1
-# POST /recall /store /status /contribute ;  GET /health
+# POST /recall /soul /store /status /contribute ;  GET /health
 ```
 
 ---
@@ -134,6 +134,7 @@ python3 glue_server.py --port 19000 --host 127.0.0.1
 |------|------|------|
 | `store` | `store(text, source="chat") -> MemoryItem` | 聚合写入：向量化 + 沙漏 + LMS |
 | `recall` | `recall(query, k=10, weights=None) -> List[MemoryItem]` | 协同检索：文本 0.3 + 向量 0.5 + LMS 激活 0.2 加权融合 |
+| `get_soul_snapshot` | `get_soul_snapshot(limit=5, recent_n=5) -> Dict[str, Any]` | 回魂快照：LMS 自述 + 状态指标 + 沙漏最近记忆（只读、fail-open、防循环） |
 | `contribute` | `contribute(topic, k=5, **kwargs) -> ContributionResult` | 从沙漏召回提炼知识，贡献到丰碑 |
 | `get_status` | `get_status() -> Dict[str, Any]` | 各后端健康状态聚合 |
 

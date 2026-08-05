@@ -197,6 +197,64 @@ class IntegratedMemoryService:
             return []
 
     # ------------------------------------------------------------------
+    # 回魂快照（会话醒来自我状态，2026-08-05）
+    # ------------------------------------------------------------------
+    def get_soul_snapshot(
+        self, limit: int = 5, recent_n: int = 5
+    ) -> Dict[str, Any]:
+        """回魂快照：LMS 自述 + 记忆状态指标 + 沙漏最近记忆。
+
+        只读、fail-open、防循环：
+          - 仅 GET（LMS /self-ref/voice、/status/{sid}；沙漏 txt 尾部读）
+          - 绝不调用 LMS /chat（不触发反思/回注/新记忆产生）
+          - 任一后端失败只缺字段，不抛异常
+
+        Returns:
+            ``{"ok": True, "ts": float, "session_id": str,
+              "lms_voice": [str], "lms_state": {…}, "recent": [{text,ts}]}``
+        """
+        import time as _time
+
+        snap: Dict[str, Any] = {"ok": True, "ts": _time.time()}
+        snap["session_id"] = getattr(self.lms, "session_id", "main") if self.lms else "main"
+
+        # 1. LMS 最近自述（复用 /self-ref/voice）
+        snap["lms_voice"] = self.get_self_ref_voice(limit=limit)
+
+        # 2. LMS 状态指标（复用 /status/{sid}，只读 GET）
+        snap["lms_state"] = {}
+        if self.lms is not None:
+            fetcher = getattr(self.lms, "fetch_status", None)
+            if callable(fetcher):
+                try:
+                    snap["lms_state"] = fetcher() or {}
+                except Exception as e:  # pragma: no cover - 任意后端异常
+                    logger.warning("回魂 lms_state 读取失败: %s", e)
+                    snap["lms_state"] = {}
+
+        # 3. 沙漏最近记忆（沙漏原生 recent，按时间倒序）
+        snap["recent"] = []
+        if self.sandglass is not None:
+            rec = getattr(self.sandglass, "recent", None)
+            if callable(rec):
+                try:
+                    items = rec(recent_n) or []
+                    snap["recent"] = [
+                        {
+                            "text": getattr(it, "text", "") or "",
+                            "ts": getattr(it, "created_at", None),
+                            "origin": getattr(it, "origin", "") or "",
+                        }
+                        for it in items[:recent_n]
+                    ]
+                except Exception as e:  # pragma: no cover - 任意后端异常
+                    logger.warning("回魂 recent 读取失败: %s", e)
+                    snap["recent"] = []
+
+        return snap
+
+
+    # ------------------------------------------------------------------
     # 应用层：知识贡献
     # ------------------------------------------------------------------
     def contribute(self, topic: str, k: int = 5, **kwargs) -> ContributionResult:

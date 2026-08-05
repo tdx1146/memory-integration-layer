@@ -162,6 +162,54 @@ class TestIntegratedMemoryService:
         with pytest.raises(AdapterError):
             IntegratedMemoryService()
 
+    def test_get_soul_snapshot_composes_all_sources(self, svc):
+        """回魂快照：自述 + 状态 + 最近记忆三源聚合。"""
+        # 给假 LMS 补 fetch_status / fetch_self_ref（回魂专用只读方法）
+        svc.lms.fetch_status = lambda: {  # type: ignore[attr-defined]
+            "entropy_ratio": 0.947,
+            "last_surprise": 0.113,
+            "purpose_coherence": 0.92,
+        }
+        svc.lms.fetch_self_ref = lambda limit=5: ["我正同时唤起多个记忆，方向稳定。"]  # type: ignore[attr-defined]
+        # 给假沙漏补 recent
+        svc.sandglass.recent = lambda n: [  # type: ignore[attr-defined]
+            MemoryItem(text=f"最近记忆{i}", origin="sandglass", created_at=1700000000 + i)
+            for i in range(2)
+        ]
+
+        snap = svc.get_soul_snapshot(limit=3, recent_n=2)
+        assert snap["ok"] is True
+        assert snap["session_id"] == "main"
+        assert snap["lms_voice"] == ["我正同时唤起多个记忆，方向稳定。"]
+        assert snap["lms_state"]["entropy_ratio"] == 0.947
+        assert snap["lms_state"]["purpose_coherence"] == 0.92
+        assert len(snap["recent"]) == 2
+        assert snap["recent"][0]["text"] == "最近记忆0"
+        assert snap["recent"][0]["origin"] == "sandglass"
+        assert snap["recent"][0]["ts"] == 1700000000
+
+    def test_get_soul_snapshot_fail_open(self, svc):
+        """fail-open：后端缺方法/抛异常 → 对应字段为空，不抛错。"""
+        # 假 LMS 无 fetch_status / fetch_self_ref，假沙漏无 recent
+        snap = svc.get_soul_snapshot()
+        assert snap["ok"] is True
+        assert snap["lms_voice"] == []
+        assert snap["lms_state"] == {}
+        assert snap["recent"] == []
+
+        # 后端方法抛异常同样 fail-open
+        def boom(*a, **k):
+            raise RuntimeError("boom")
+
+        svc.lms.fetch_status = boom  # type: ignore[attr-defined]
+        svc.lms.fetch_self_ref = boom  # type: ignore[attr-defined]
+        svc.sandglass.recent = boom  # type: ignore[attr-defined]
+        snap2 = svc.get_soul_snapshot()
+        assert snap2["ok"] is True
+        assert snap2["lms_voice"] == []
+        assert snap2["lms_state"] == {}
+        assert snap2["recent"] == []
+
     def test_cosine_pure_function(self):
         assert IntegratedMemoryService._cosine([1.0, 0.0], [1.0, 0.0]) == pytest.approx(1.0)
         assert IntegratedMemoryService._cosine([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
