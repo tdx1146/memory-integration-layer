@@ -58,7 +58,7 @@ _load_dotenv()  # 必须在下方模块导入之前执行
 # 沙漏 txt 主数据目录（sandglass_vault 数据源）
 from interfaces.adapters.sandglass_vault_adapter import SANDGLASS_HOME
 
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 # ────────────────────────── 真实后端路径配置 ──────────────────────────
@@ -229,7 +229,11 @@ def main():
     print(f"[glue] 胶水层已装配: {svc}")
     print(f"[glue] 后端: 沙漏({SANDGLASS_HOME}) | LMS({LMS_URL}) | 向量({VECTOR_URL})")
 
-    server = HTTPServer((args.host, args.port), GlueHandler)
+    # P1-1 止血：单线程 HTTPServer → ThreadingHTTPServer。
+    # 此前单线程模型下，一个慢请求（如 /recall 协同检索等待 LMS/向量/沙漏）
+    # 会阻塞后续全部请求（含 /health 存活探针）→ 网关误判 glue 死掉。
+    # 线程化后慢请求不再阻塞其他请求（其他行为不变）。
+    server = ThreadingHTTPServer((args.host, args.port), GlueHandler)
     print(f"[glue] 胶水层 HTTP 服务: http://{args.host}:{args.port}")
     try:
         server.serve_forever()
