@@ -66,11 +66,61 @@ class LMSAdapter(CognitivePort):
 
     # -- 私有工具 -----------------------------------------------------------
     def _submit(self, user_input: str) -> Dict[str, Any]:
-        """调用 LMS /chat，返回解析后的 JSON（可能含 memory_state / memory_context）。"""
+        """调用 LMS /chat，返回解析后的 JSON（可能含 memory_state / memory_context）。
+
+        仅供写路径（store）使用；读路径一律走 _recall_readonly（T1.6/P0-12），
+        避免查询本身被 process_turn 写进大脑（查询回声污染）。
+        """
         return self._post(
             f"{self.api_url}/chat",
             {"user_input": user_input, "session_id": self.session_id},
         )
+
+    def _recall_readonly(self, query: str, k: int) -> Dict[str, Any]:
+        """调用 LMS /recall 只读检索端点（T1.6/P0-12）。
+
+        与 /chat 的区别：/recall 只做编码+检索，**不 process_turn、不调 LLM、
+        不写缓冲、不落盘**（~1s）——查询不会再作为记忆写进大脑。
+        返回 JSON 含 results=[{'text','score'},...] 与 turn_count（只读锚点）。
+        """
+        return self._post(
+            f"{self.api_url}/recall",
+            {"session_id": self.session_id, "query": query, "k": k},
+        )
+
+    @staticmethod
+    def _build_memory_context(query: str, results: List[Dict[str, Any]]) -> str:
+        """把 /recall 结果拼装成与旧 /chat memory_context 兼容的文本。
+
+        下游（integration_service.recall）依赖 ``parse_lms_context`` 解析：
+          - 编号引号行 ``1. "..."`` → recalled 文本（_RECALL_RE）
+          - ``惊讶度: X`` / ``熵: Y`` → surprise / entropy
+        返回结构保持 {"memory_context": str, ...} 不变（glue_server 依赖）。
+        """
+        lines = [f"检索到 {len(results)} 条相关记忆（查询: \"{query}\"）:"]
+        for i, r in enumerate(results, 1):
+            text = (r or {}).get("text", "")
+            if not text:
+                continue
+            # 单行化 + 转义内嵌双引号，保证 _RECALL_RE 可解析（与旧格式同构）
+            one_line = " ".join(text.split())[:300].replace('"', "'")
+            lines.append(f'{i}. "{one_line}"')
+        return "\n".join(lines)
+
+    def _status_surprise_entropy(self) -> Dict[str, float]:
+        """只读补充惊讶度/熵（可选，失败返回空 dict，不影响主结果）。"""
+        try:
+            data = self._get(f"{self.api_url}/status/{self.session_id}")
+            st = data.get("status", {}) if isinstance(data, dict) else {}
+            out: Dict[str, float] = {}
+            if st.get("last_surprise") is not None:
+                out["surprise"] = float(st["last_surprise"])
+            if st.get("last_entropy") is not None:
+                out["entropy"] = float(st["last_entropy"])
+            return out
+        except Exception as e:  # pragma: no cover - 网络
+            logger.warning("LMS 状态补充读取失败: %s", e)
+            return {}
 
     # -- CognitivePort ------------------------------------------------------
     def store(self, memory: MemoryItem) -> bool:
@@ -91,9 +141,30 @@ class LMSAdapter(CognitivePort):
             return False
 
     def fetch_context(self, query: str) -> Dict[str, Any]:
-        """获取 LMS /chat 完整响应（含 memory_context 激活信息）。失败返回 {}。"""
+        """获取 LMS 只读检索响应（含 memory_context 激活信息）。失败返回 {}。
+
+        T1.6/P0-12：改调 /recall 只读端点——旧实现走 /chat 会把"查询本身"
+        process_turn 存进 main 脑（查询回声污染，main 脑 225 轮里大量是查询/
+        prompt 片段）。现在读路径彻底只读：不 process_turn、不写缓冲、不落盘。
+        返回格式保持与旧 /chat 兼容（{"memory_context": str, ...}），
+        下游 parse_lms_context 可直接解析（glue_server 依赖不变）。
+        """
         try:
-            return self._submit(query) or {}
+            data = self._recall_readonly(query, k=8) or {}
+            results = data.get("results", []) if isinstance(data, dict) else []
+            ctx = self._build_memory_context(query, results)
+            # 只读状态补充（惊讶度/熵），供下游 surprise 加权；失败则省略。
+            # 注意：与旧 /chat memory_context 同构——冒号后无空格（parse_lms_context
+            # 的 _SURPRISE_RE/_ENTROPY_RE 为 r"惊讶度:([0-9.]+)" / r"熵:([0-9.]+)"）。
+            extra = self._status_surprise_entropy()
+            if extra.get("surprise") is not None:
+                ctx += f"\n惊讶度:{extra['surprise']:.3f}"
+            if extra.get("entropy") is not None:
+                ctx += f"\n熵:{extra['entropy']:.3f}"
+            return {
+                "memory_context": ctx,
+                "recall_data": data,  # 附带原始只读结果（含 turn_count 锚点）
+            }
         except Exception as e:  # pragma: no cover - 网络
             logger.warning("LMS fetch_context 失败: %s", e)
             return {}
@@ -135,12 +206,16 @@ class LMSAdapter(CognitivePort):
     def recall(self, query: str, k: int = 5) -> List[MemoryItem]:
         if k < 1 or k > 100:
             raise CapacityError(f"recall: k 越界 {k}")
-        # LMS 的显式检索经 /chat 的 memory_context 返回；此处提供降级实现。
+        # T1.6/P0-12：改调 /recall 只读端点（旧实现走 /chat 会写入查询回声）。
         # 深层的语义召回由服务层（integration_service）基于 fetch_context 融合。
         try:
-            data = self._submit(query)
-            ctx = data.get("memory_context", "") if isinstance(data, dict) else ""
-            items = _parse_context(ctx)
+            data = self._recall_readonly(query, k=k)
+            results = data.get("results", []) if isinstance(data, dict) else []
+            items: List[MemoryItem] = []
+            for r in results:
+                text = (r or {}).get("text", "")
+                if text:
+                    items.append(MemoryItem(text=text, origin="lms", system="lms"))
             return items[:k]
         except Exception as e:  # pragma: no cover - 网络
             logger.warning("LMS 检索失败: %s", e)
