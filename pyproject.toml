@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lms-client"
+version = "0.1.0"
+description = "LMS 活体记忆系统跨平台 SDK（openclaw / codex / workbody 统一接入：HTTP 客户端 + MCP 桥 + CLI）"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "LMS Team" }]
+keywords = ["lms", "memory", "mcp", "sdk", "living-memory"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries",
+]
+# 零强制运行时依赖：httpx 可用则用（更完整超时/连接语义），
+# 缺失时自动回退 stdlib urllib —— 任何平台可直接运行。
+dependencies = []
+
+[project.optional-dependencies]
+http = ["httpx>=0.23"]
+
+[project.scripts]
+lms = "lms_client.cli:main"
+lms-mcp = "lms_client.mcp_bridge:main"
+
+[tool.setuptools]
+# 只打包 lms_client 包（仓库根目录其余组件如 interfaces/ 不随 SDK 安装）
+packages = ["lms_client"]
