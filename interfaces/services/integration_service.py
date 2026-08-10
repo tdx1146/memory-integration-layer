@@ -131,12 +131,13 @@ class IntegratedMemoryService:
         """
         weights = {**DEFAULT_WEIGHTS, **(weights or {})}
 
-        # 1. 沙漏文本召回（无命中直接返回空）
-        if self.sandglass is None:
-            return []
-        sandglass_results = self.sandglass.recall(query, k)
-        if not sandglass_results:
-            return []
+        # 1. 沙漏文本召回
+        sandglass_results = []
+        if self.sandglass is not None:
+            try:
+                sandglass_results = self.sandglass.recall(query, k) or []
+            except Exception as e:  # pragma: no cover
+                logger.warning("沙漏召回失败: %s", e)
 
         # 2. 查询向量
         q_vec = None
@@ -146,9 +147,12 @@ class IntegratedMemoryService:
             except Exception as e:  # pragma: no cover - 网络
                 logger.warning("查询向量化失败: %s", e)
 
-        # 3. LMS 激活信息
+        # 3. LMS 激活信息 + LMS 自身召回文本（2026-08-10 修复：
+        #    此前 LMS 召回只用来给沙漏条目加分，自身文本从不作为结果返回，
+        #    且沙漏无命中直接返回空 → LMS 真实记忆永远进不了注入）
         lms_data: Dict[str, Any] = {}
         recalled_texts: List[str] = []
+        lms_items: List[MemoryItem] = []
         surprise = 0.0
         if self.lms is not None:
             try:
@@ -159,10 +163,22 @@ class IntegratedMemoryService:
                 lms_data = parse_lms_context(mc)
                 recalled_texts = lms_data.get("recalled", [])
                 surprise = lms_data.get("surprise", 0.0)
+                # LMS 召回文本 → MemoryItem（origin="lms"，进结果列表）
+                rd = (ctx or {}).get("recall_data") or {}
+                for r in (rd.get("results") or []):
+                    txt = (r.get("text") or "").strip()
+                    if not txt:
+                        continue
+                    lms_items.append(MemoryItem(
+                        id=f"lms:{r.get('session_id','main')}:{r.get('turn', '')}",
+                        text=txt,
+                        origin="lms",
+                        metadata={"score": float(r.get("score", 0) or 0)},
+                    ))
             except Exception as e:  # pragma: no cover - 任意后端异常
                 logger.warning("LMS 激活信息获取失败: %s", e)
 
-        # 4. 逐条打分
+        # 4. 逐条打分（沙漏条目）
         surprise_norm = min(surprise / 20.0, 1.0)
         has_recall = bool(recalled_texts)
         scored = []
@@ -208,7 +224,30 @@ class IntegratedMemoryService:
             })
             scored.append((total, item))
 
-        # 5. 降序排序，截取前 k
+        # 4b. LMS 自身召回文本直接进结果池（origin="lms"）
+        #     2026-08-10 修复：LMS 真实记忆不再只当"加分项"，而是独立结果。
+        for it in lms_items:
+            txt_score = self._text_score(query, it.text)
+            total = (
+                weights["text"] * txt_score
+                + weights["vector"] * (it.metadata.get("score") or 0)
+                + weights["lms"] * 1.0  # LMS 命中即满激活
+            )
+            it.metadata.setdefault("scores", {
+                "text": round(txt_score, 3),
+                "vector": round(it.metadata.get("score") or 0, 3),
+                "lms_activation": 1.0,
+                "total": round(total, 3),
+            })
+            it.metadata.setdefault("lms", {
+                "surprise": round(surprise, 3),
+                "entropy": round(lms_data.get("entropy", 0.0), 3),
+                "active_node_count": len(lms_data.get("active_nodes", [])),
+                "recalled_texts": recalled_texts,
+            })
+            scored.append((total, it))
+
+        # 5. 降序排序，截取前 k（含沙漏空但 LMS 有的情况）
         scored.sort(key=lambda x: x[0], reverse=True)
         results = [item for _, item in scored[:k]]
         logger.debug(

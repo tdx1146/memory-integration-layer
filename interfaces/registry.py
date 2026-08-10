@@ -139,7 +139,14 @@ def _chain_cognitive() -> CognitivePort:
 
 
 class _CompositeCognitive(CognitivePort):
-    """组合认知适配器：状态来自 LMS，显式记忆来自沙漏。"""
+    """组合认知适配器：状态来自 LMS，显式记忆来自沙漏。
+
+    2026-08-10 修复（毛毛，dandan 质问"LMS 活了吗"）：
+    此前 recall 只走沙漏（memory_source），LMS 的 recall 从未被调用——
+    注入给主 AI 的全是沙漏 cron 噪音，LMS 116 轮真实对话一条都没回到对话。
+    现改为融合：LMS 召回（隐式记忆，语义权重高）+ 沙漏召回（显式记忆）合并，
+    去重后按分排序。LMS 不可达时自动只走沙漏（fail-open）。
+    """
 
     def __init__(self, state_source, memory_source, fallback):
         self._state = state_source
@@ -153,10 +160,38 @@ class _CompositeCognitive(CognitivePort):
             return bool(self._fallback.store(memory))
 
     def recall(self, query, k=5) -> list:
+        """融合召回：LMS（活体隐式记忆）+ 沙漏（显式记忆），按分排序去重。"""
+        items = []
+        # 1) LMS 召回（活体记忆——真实对话痕迹；失败静默降级）
         try:
-            return list(self._memory.recall(query, k))
+            items.extend(self._state.recall(query, k))  # state_source 即 LMSCognitiveAdapter
         except Exception:
-            return self._fallback.recall(query, k)
+            pass
+        # 2) 沙漏召回（显式记忆）
+        try:
+            items.extend(self._memory.recall(query, k))
+        except Exception:
+            pass
+        # 3) 全失败才回退 Dummy
+        if not items:
+            try:
+                return list(self._fallback.recall(query, k))
+            except Exception:
+                return []
+        # 去重（按 id/text 指纹）+ 按 score 降序
+        seen = set()
+        dedup = []
+        for it in items:
+            key = getattr(it, "id", None) or hash(str(getattr(it, "text", ""))[:64])
+            if key in seen:
+                continue
+            seen.add(key)
+            dedup.append(it)
+        scored = [
+            (it, float((it.metadata or {}).get("score", 0) or 0)) for it in dedup
+        ]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [it for it, _ in scored[:k]]
 
     def get_state(self):
         try:
