@@ -193,7 +193,10 @@ class IntegratedMemoryService:
         # 到 1.0（弱激励变常数）；旧 F 可负时 lms_activation 为负（惩罚 LMS）
         # 的缺陷一并消除。窗口取最近 200 条；退化（无起伏）时给中性 0.5。
         w = self._recent_surprises
-        lo, hi = min(w), max(w) if w else 0.0
+        if w:
+            lo, hi = min(w), max(w)
+        else:
+            lo, hi = 0.0, 0.0  # 空窗口（LMS 未就绪/首调失败）→ 中性 0.5，fail-open 不崩
         if hi - lo > 1e-8:
             surprise_norm = min(max((surprise - lo) / (hi - lo), 0.0), 1.0)
         else:
