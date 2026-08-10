@@ -2,6 +2,12 @@
 
 > AgentOS 的**胶水层**：在一条确定链路里整合沙漏（叙事记忆）、LMS（活体记忆）、向量（bge-m3）、丰碑（知识网络）。
 
+> 🔗 **系统定位**（2026-08-10）：本模块是「胶水层 glue」。
+> 上游依赖：LMS(:8190)、沙漏(:17333)、向量(:11435) ｜ 下游消费者：OpenClaw 插件（glue-memory-injector）、Agent OS 总线
+> 外部接口：`:19000` /health、`/recall`、`storeTurn`；doubt_adapter（doubt_episode 账本，需 `DOUBT_BUS_FILE` 启用总线发布）
+> 仓库：`https://github.com/tdx1146/memory-integration-layer`（master）
+> 系统全图：**见 `tdx1146/agent-os` 仓库的 `TOPOLOGY.md`**（https://github.com/tdx1146/agent-os/blob/main/TOPOLOGY.md）
+
 ---
 
 ## 一、项目定位
