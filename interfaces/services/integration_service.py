@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections import deque
 from typing import Any, Dict, List, Optional
 
 from interfaces.base import CognitivePort, SensorPort, ApplicationPort
@@ -76,6 +77,12 @@ class IntegratedMemoryService:
         self.lms = lms
         self.vector = vector
         self.monument = monument
+
+        # G1（2026-08-10 惊讶度语义拆分，设计v1.1 §2.2 定案）：
+        # 最近 N=200 条 surprise 滑动窗口，用于窗口 min-max 归一化。
+        # surprise 现为准确性项（恒≥0，量级 O(1~100)），旧 `/20` 常数缩放会
+        # 恒饱和到 1.0（弱激励变常数）且旧 F 负值惩罚缺陷一并由 min-max 消除。
+        self._recent_surprises: deque = deque(maxlen=200)
 
         # 对构造缺省项做安全校验，方便 TDD 尽早暴露装配错误
         if not any(
@@ -163,6 +170,8 @@ class IntegratedMemoryService:
                 lms_data = parse_lms_context(mc)
                 recalled_texts = lms_data.get("recalled", [])
                 surprise = lms_data.get("surprise", 0.0)
+                # G1：记录到窗口（供窗口 min-max 归一化）
+                self._recent_surprises.append(float(surprise))
                 # LMS 召回文本 → MemoryItem（origin="lms"，进结果列表）
                 rd = (ctx or {}).get("recall_data") or {}
                 for r in (rd.get("results") or []):
@@ -179,7 +188,16 @@ class IntegratedMemoryService:
                 logger.warning("LMS 激活信息获取失败: %s", e)
 
         # 4. 逐条打分（沙漏条目）
-        surprise_norm = min(surprise / 20.0, 1.0)
+        # G1（2026-08-10，设计v1.1 §2.2 定案）：surprise/20 常数缩放 →
+        # 窗口 min-max 归一化。surprise 现为准确性项 O(1~100)，/20 后恒饱和
+        # 到 1.0（弱激励变常数）；旧 F 可负时 lms_activation 为负（惩罚 LMS）
+        # 的缺陷一并消除。窗口取最近 200 条；退化（无起伏）时给中性 0.5。
+        w = self._recent_surprises
+        lo, hi = min(w), max(w) if w else 0.0
+        if hi - lo > 1e-8:
+            surprise_norm = min(max((surprise - lo) / (hi - lo), 0.0), 1.0)
+        else:
+            surprise_norm = 0.5  # 窗口退化（无起伏）→ 中性激励
         has_recall = bool(recalled_texts)
         scored = []
         for item in sandglass_results:
