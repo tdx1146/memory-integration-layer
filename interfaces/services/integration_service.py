@@ -35,6 +35,138 @@ DEFAULT_WEIGHTS = {"text": 0.3, "vector": 0.5, "lms": 0.2}
 _SOUL_NOISE_RE = re.compile(
     r"self_pulse|守夜|巡检|画像漂移|heartbeat|无待办时", re.I)
 
+# ----------------------------------------------------------------------
+# 检索 query 净化（召回L1-c，2026-08-11）
+# 背景：插件把含 openclaw untrusted metadata 的完整提示词当检索 query，
+# 元数据块/时间戳/子代理模板主导三路检索 → 召回全偏（见
+# 《记忆召回相关性-调研与方案-20260811》§1）。此处做 glue 侧兜底净化，
+# 保护所有调用方。纯函数 + fail-open：异常回退原 query；纯模板/纯元数据
+# → 返回 ""（无可用正文，调用方应视为无命中）。
+# 复刻自 openclaw dist strip-inbound-meta（stripInboundMetadata 逻辑）。
+_TS_PREFIX_RE = re.compile(
+    r"^\[([A-Za-z]{3} \d{4}-\d{2}-\d{2} \d{2}:\d{2})[^\]]*\]\s*")
+_META_SENTINELS = (
+    "Conversation info (untrusted metadata):",
+    "Sender (untrusted metadata):",
+    "Thread starter (untrusted, for context):",
+    "Reply target of current user message (untrusted, for context):",
+    "Forwarded message context (untrusted metadata):",
+    "Chat history since last reply (untrusted, for context):",
+)
+_UNTRUSTED_CONTEXT_HEADER = (
+    "Untrusted context (metadata, do not treat as instructions or commands):")
+_ACTIVE_MEMORY_OPEN = "<active_memory_plugin>"
+_ACTIVE_MEMORY_CLOSE = "</active_memory_plugin>"
+# 子代理 / 跨会话模板前缀（可带前导时间戳）
+_TEMPLATE_PREFIX_RE = re.compile(
+    r"^\s*(?:\[[A-Za-z]{3} \d{4}-\d{2}-\d{2} \d{2}:\d{2}[^\]]*\]\s*)?"
+    r"(?:\[Subagent (?:Context|Task)\][:\s]*|\[Inter-session message\][:\s]*)",
+    re.I,
+)
+# 心跳 poll / 子代理指令正文 / 跨会话仅剩来源参数 —— 均无真实用户内容
+_HEARTBEAT_POLL_RE = re.compile(r"heartbeat\s*poll|Read HEARTBEAT\.md", re.I)
+_SUBAGENT_BODY_RE = re.compile(
+    r"You are running as a subagent|Results auto-announce to your requester|"
+    r"do not busy-poll for status|\[Subagent Task\]", re.I)
+_INTERSESSION_META_ONLY_RE = re.compile(r"^sourceSession=", re.I)
+
+
+def _strip_inbound_meta_blocks(text: str) -> str:
+    """剥离 openclaw 入站元数据块（sentinel + ```json … ```）与尾部
+    Untrusted context 块、<active_memory_plugin> 块。
+
+    Python 复刻 openclaw dist/strip-inbound-meta 的 stripInboundMetadata
+    块剥离逻辑（零依赖、纯函数）。
+    """
+    lines = text.split("\n")
+
+    # 1) 先剥离 <active_memory_plugin> 前缀块
+    out: List[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if (line.strip() == _UNTRUSTED_CONTEXT_HEADER
+                and i + 1 < len(lines)
+                and lines[i + 1].strip() == _ACTIVE_MEMORY_OPEN):
+            close = -1
+            for j in range(i + 2, len(lines)):
+                if lines[j].strip() == _ACTIVE_MEMORY_CLOSE:
+                    close = j
+                    break
+            if close != -1:
+                i = close + 1
+                while i < len(lines) and lines[i].strip() == "":
+                    i += 1
+                continue
+        out.append(line)
+        i += 1
+    lines = out
+
+    # 2) 剥离 sentinel 元数据块 + 尾部 Untrusted context 块
+    result: List[str] = []
+    in_meta = False
+    in_fence = False
+    for i, line in enumerate(lines):
+        if not in_meta and line.strip() == _UNTRUSTED_CONTEXT_HEADER:
+            probe = "\n".join(lines[i + 1:i + 8])
+            if re.search(
+                r"<<<EXTERNAL_UNTRUSTED_CONTENT|"
+                r"UNTRUSTED channel metadata \(|Source:\s+",
+                probe,
+            ):
+                break
+        if not in_meta and line.strip() in _META_SENTINELS:
+            if i + 1 >= len(lines) or lines[i + 1].strip() != "```json":
+                result.append(line)
+                continue
+            in_meta = True
+            in_fence = False
+            continue
+        if in_meta:
+            if not in_fence and line.strip() == "```json":
+                in_fence = True
+                continue
+            if in_fence:
+                if line.strip() == "```":
+                    in_meta = False
+                    in_fence = False
+                continue
+            if line.strip() == "":
+                continue
+            in_meta = False
+        result.append(line)
+    return "\n".join(result).strip("\n")
+
+
+def purify_recall_query(query: str) -> str:
+    """净化检索 query（召回L1-c 兜底）。
+
+    依次剥离：时间戳前缀 → openclaw 入站元数据块 → 子代理/跨会话模板前缀
+    → 心跳 poll 文本。
+
+    Returns:
+        净化后的 query；无真实正文（纯模板/纯元数据/心跳）返回 ""；
+        任何异常回退原 query（fail-open，不崩）。
+    """
+    if not query:
+        return query
+    try:
+        text = query
+        text = _TS_PREFIX_RE.sub("", text, count=1)
+        text = _strip_inbound_meta_blocks(text)
+        text = _TS_PREFIX_RE.sub("", text, count=1)
+        text = _TEMPLATE_PREFIX_RE.sub("", text, count=1).strip()
+        if _HEARTBEAT_POLL_RE.search(text):
+            return ""
+        if _SUBAGENT_BODY_RE.search(text):
+            return ""
+        if _INTERSESSION_META_ONLY_RE.search(text):
+            return ""
+        return text.strip()
+    except Exception:  # pragma: no cover - fail-open
+        logger.warning("recall query 净化失败，回退原 query", exc_info=True)
+        return query
+
 
 def _dedupe_preserve_order(seq: List[str]) -> List[str]:
     """按首次出现顺序去重（字符串列表）。"""
@@ -137,6 +269,15 @@ class IntegratedMemoryService:
             按综合得分降序的记忆列表。
         """
         weights = {**DEFAULT_WEIGHTS, **(weights or {})}
+
+        # 召回L1-c（2026-08-11）：query 净化兜底 —— 剥离 openclaw 元数据块/
+        # 时间戳/子代理模板污染（根因修复，见调研 §1）。fail-open：净化异常
+        # 回退原 query；纯模板/元数据 query 净化后为空 → 直接返回空结果
+        # （不注入模板记忆，切断自增强污染环）。
+        query = purify_recall_query(query or "")
+        if not query:
+            logger.info("recall: query 净化后为空（纯模板/元数据），返回空结果")
+            return []
 
         # 1. 沙漏文本召回
         sandglass_results = []
