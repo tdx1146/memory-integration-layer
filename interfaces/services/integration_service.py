@@ -178,6 +178,19 @@ class IntegratedMemoryService:
                     txt = (r.get("text") or "").strip()
                     if not txt:
                         continue
+                    # 体验层 D（设计 v1.1 §8.3）：低置信条目加置信度注解
+                    # （≤10 字/条：⚠️置信X[驳N]，只注解 confidence<0.5 条目；
+                    # 让 [记忆注入] 看见"这条记忆值不值得信"——怀疑质检员语义）
+                    try:
+                        conf = float(r.get("confidence") or 1.0)
+                    except (TypeError, ValueError):
+                        conf = 1.0
+                    if conf < 0.5:
+                        rebut = int(r.get("rebuttal_count") or 0)
+                        tag = f"⚠️置信{conf:.1f}"
+                        if rebut > 0:
+                            tag += f"驳{rebut}"
+                        txt = f"{txt} {tag}"
                     lms_items.append(MemoryItem(
                         id=f"lms:{r.get('session_id','main')}:{r.get('turn', '')}",
                         text=txt,
