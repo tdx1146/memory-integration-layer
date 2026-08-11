@@ -8,6 +8,7 @@
 
 统一入口（对应 service 方法）：
     POST /recall        协同检索（文本0.3 + 向量0.5 + LMS激活0.2 加权融合）
+    POST /react         实时反应薄代理（体验层 A：转发 LMS /react，infer-only）
     POST /soul          回魂快照（LMS自述+状态+沙漏最近记忆，只读fail-open防循环）
     POST /store         聚合写入（向量化 + 沙漏 + LMS）
     POST /status        各后端健康 + 记忆数聚合
@@ -24,12 +25,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 import time
+import urllib.error
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+
+logger = logging.getLogger("glue")
 
 
 def _load_dotenv(path: str = os.path.join(HERE, ".env")):
@@ -166,6 +172,37 @@ class GlueHandler(BaseHTTPRequestHandler):
                     "results": result,
                     "self_ref": svc.get_self_ref_voice(),
                 })
+
+            elif path == "/react":
+                # 体验层 A（设计 v1.1 §3.4）：/react 薄代理（LMS infer-only
+                # 实时反应）。插件只知 glueUrl，glue 是统一编排
+                # （CONTRACTS.yaml glue role），保持一致、插件不直连 8190。
+                # LMS 失败 → 502/空（fail-open：插件降级旧行为，不阻塞主循环）。
+                user_input = body.get("user_input", "")
+                k = int(body.get("k", 0) or 0)
+                if not user_input:
+                    self._send(400, {"error": "user_input 必填"})
+                    return
+                try:
+                    payload = json.dumps({
+                        "user_input": user_input,
+                        "session_id": body.get("session_id", "main"),
+                        "k": k,
+                    }).encode("utf-8")
+                    req = urllib.request.Request(
+                        f"{LMS_URL}/react", data=payload, method="POST",
+                        headers={"Content-Type": "application/json"})
+                    with urllib.request.urlopen(req, timeout=6) as resp:
+                        raw = resp.read().decode("utf-8")
+                    try:
+                        data = json.loads(raw)
+                    except Exception:
+                        data = {"raw": raw}
+                    self._send(200, data)
+                except Exception as e:
+                    logger.warning(
+                        "[glue] /react 转发 LMS 失败（502 fail-open）: %s", e)
+                    self._send(502, {"error": f"LMS /react 不可达: {e}"})
 
             elif path == "/soul":
                 # 回魂快照：LMS 自述 + 状态 + 沙漏最近记忆（只读、fail-open、防循环）
