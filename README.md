@@ -2,11 +2,11 @@
 
 > AgentOS 的**胶水层**：在一条确定链路里整合沙漏（叙事记忆）、LMS（活体记忆）、向量（bge-m3）、丰碑（知识网络）。
 
-> 🔗 **系统定位**（2026-08-10）：本模块是「胶水层 glue」。
+> 🔗 **系统定位**（2026-08-11）：本模块是「胶水层 glue」。
 > 上游依赖：LMS(:8190)、沙漏(:17333)、向量(:11435) ｜ 下游消费者：OpenClaw 插件（glue-memory-injector）、Agent OS 总线
-> 外部接口：`:19000` /health、`/recall`、`storeTurn`；doubt_adapter（doubt_episode 账本，需 `DOUBT_BUS_FILE` 启用总线发布）
-> 仓库：`https://github.com/tdx1146/memory-integration-layer`（master）
-> 系统全图：**见 `tdx1146/agent-os` 仓库的 `TOPOLOGY.md`**（https://github.com/tdx1146/agent-os/blob/main/TOPOLOGY.md）
+> 外部接口：`:19000` /health、`/recall`、`/soul`、`/store`、`/status`、`/contribute`、**`/react`（体验层A 薄代理：转发 LMS /react，失败 502 fail-open）**；doubt_adapter（doubt_episode 账本，需 `DOUBT_BUS_FILE` 启用总线发布）
+> 仓库：`https://github.com/tdx1146/memory-integration-layer`（**main，公开**）
+> 系统全图：**见 `tdx1146/agent-os` 仓库的 `TOPOLOGY.md`**（https://github.com/tdx1146/agent-os/blob/main/TOPOLOGY.md）｜ **部署中心/数据流/踩坑：`SYSTEM.md`**（https://github.com/tdx1146/agent-os/blob/main/SYSTEM.md）
 
 ---
 
@@ -127,7 +127,7 @@ python3 glue_helper.py status
 
 ```bash
 python3 glue_server.py --port 19000 --host 127.0.0.1
-# POST /recall /soul /store /status /contribute ;  GET /health
+# POST /recall /soul /store /status /contribute /react（体验层A 薄代理）;  GET /health
 ```
 
 ---
@@ -139,7 +139,8 @@ python3 glue_server.py --port 19000 --host 127.0.0.1
 | 方法 | 签名 | 作用 |
 |------|------|------|
 | `store` | `store(text, source="chat") -> MemoryItem` | 聚合写入：向量化 + 沙漏 + LMS |
-| `recall` | `recall(query, k=10, weights=None) -> List[MemoryItem]` | 协同检索：文本 0.3 + 向量 0.5 + LMS 激活 0.2 加权融合 |
+| `recall` | `recall(query, k=10, weights=None) -> List[MemoryItem]` | 协同检索：文本 0.3 + 向量 0.5 + LMS 激活 0.2 加权融合（体验层D：条目带 confidence/rebuttal_count/labile 置信度注解） |
+| `react` | `react(user_input, k=0) -> Dict` | 实时反应薄代理（体验层A：转发 LMS /react，返回 reaction+interpretation；LMS 失败 502 fail-open） |
 | `get_soul_snapshot` | `get_soul_snapshot(limit=5, recent_n=5) -> Dict[str, Any]` | 回魂快照：LMS 自述 + 状态指标 + 沙漏最近记忆（只读、fail-open、防循环） |
 | `contribute` | `contribute(topic, k=5, **kwargs) -> ContributionResult` | 从沙漏召回提炼知识，贡献到丰碑 |
 | `get_status` | `get_status() -> Dict[str, Any]` | 各后端健康状态聚合 |
@@ -248,8 +249,9 @@ python3 -m pytest interfaces/test_interfaces.py tests/ --cov=interfaces --cov-re
 
 | 项目 | 说明 |
 |------|------|
-| [living-memory-system](https://github.com/tdx1146/living-memory-system) | 活体记忆系统（LMS） |
-| [agent-os-iso-sand](https://github.com/tdx1146/agent-os-iso-sand) | 同构沙盘 |
+| [living-memory-system](https://github.com/tdx1146/living-memory-system) | 活体记忆系统（LMS，含体验层 /react/置信度场） |
+| [agent-os](https://github.com/tdx1146/agent-os) | 系统中枢（**部署中心 SYSTEM.md** / 权威拓扑 TOPOLOGY.md） |
+| [agent-os-iso-sand](https://github.com/tdx1146/agent-os-iso-sand) | 同构沙盘（已 archive） |
 | [monument-network](https://github.com/tdx1146/monument-network) | 丰碑网络 |
 
 ---
@@ -260,4 +262,4 @@ MIT License
 
 ---
 
-_最后更新：2026-08-04（胶水层统一接入 + 沙漏 txt 权威源 + 方向A整理）_
+_最后更新：2026-08-11（体验层 /react 薄代理 + 部署流程同步更新）_
