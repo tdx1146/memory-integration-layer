@@ -117,12 +117,15 @@ class GlueHandler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
-    def _send(self, code: int, obj):
+    def _send(self, code: int, obj, extra_headers: dict | None = None):
         data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-store")
+        if extra_headers:
+            for k, v in extra_headers.items():
+                self.send_header(k, v)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -225,6 +228,68 @@ class GlueHandler(BaseHTTPRequestHandler):
                     "entropy": item.entropy,
                     "surprise": item.surprise,
                 })
+
+            elif path == "/store-turn":
+                # 提取层阶段2（S2-3，设计 v1.1 §3.2）：/store 写侧薄代理。
+                # 插件 agent_end → glue /store-turn → LMS /store。
+                #   - 统一入口：插件只知 glueUrl（/recall//soul//react 同款既有约定）
+                #   - sender 仅 glue 日志审计用，不转发（LMS StoreRequest 无此字段，
+                #     不改 LMS——L1 承诺）
+                #   - timeout=10s（M-3 校准：/store 内部 3 次跨机 embed 常态
+                #     3.6-4.5s、最坏 ≈6.75s，10s 留 ≥3s 余量；不复用 /react 的
+                #     6s——那是读侧单次 embed 预算）
+                #   - 响应透传（不改结构）；429/503 透传 Retry-After；
+                #     LMS 不可达/超时 → 502（fail-open，插件不重试）
+                user_input = body.get("user_input", "")
+                llm_output = body.get("llm_output", "")
+                session_id = body.get("session_id", "main")
+                sender = body.get("sender", "unknown")
+                if not user_input:
+                    self._send(400, {"error": "user_input 必填"})
+                    return
+                try:
+                    payload = json.dumps({
+                        "user_input": user_input,
+                        "llm_output": llm_output,
+                        "session_id": session_id,
+                    }).encode("utf-8")
+                    req = urllib.request.Request(
+                        f"{LMS_URL}/store", data=payload, method="POST",
+                        headers={"Content-Type": "application/json"})
+                    try:
+                        with urllib.request.urlopen(req, timeout=10) as resp:
+                            raw = resp.read().decode("utf-8")
+                        try:
+                            data = json.loads(raw)
+                        except Exception:
+                            data = {"raw": raw}
+                        # 审计日志：sender + 写侧结果（stored/dedup_hit/turn_count
+                        # —— M-1 灰度判据 3 的数据源，独立权威对账）
+                        logger.info(
+                            "[glue] /store-turn sender=%s session=%s stored=%s dedup_hit=%s turn=%s",
+                            sender, session_id,
+                            data.get("stored"), data.get("dedup_hit"),
+                            data.get("turn_count"))
+                        self._send(200, data)
+                    except urllib.error.HTTPError as e:
+                        # 429/503/422/400 → 透传状态码＋Retry-After（插件不重试，
+                        # C-05 先例：503=做梦协调/熔断降级属预期失败）
+                        body_bytes = e.read().decode("utf-8", "replace")
+                        retry_after = e.headers.get("Retry-After")
+                        try:
+                            err_data = json.loads(body_bytes)
+                        except Exception:
+                            err_data = {"detail": body_bytes}
+                        logger.warning(
+                            "[glue] /store-turn sender=%s session=%s LMS 返回 %s",
+                            sender, session_id, e.code)
+                        self._send(
+                            e.code, err_data,
+                            {"Retry-After": retry_after} if retry_after else None)
+                except Exception as e:
+                    logger.warning(
+                        "[glue] /store-turn 转发 LMS 失败（502 fail-open）: %s", e)
+                    self._send(502, {"error": f"LMS /store 不可达: {e}"})
 
             elif path == "/status":
                 st = svc.get_status()
