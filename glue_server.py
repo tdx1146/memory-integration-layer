@@ -270,6 +270,23 @@ class GlueHandler(BaseHTTPRequestHandler):
                             sender, session_id,
                             data.get("stored"), data.get("dedup_hit"),
                             data.get("turn_count"))
+                        # 2026-08-19 沙漏双向修复：agent 回复（llm_output）落沙，
+                        # 恢复沙→我们之外的我们→沙流动（08-12 起 agent 侧静默）。
+                        # sender 用调用方 sender（openclaw 插件传 agent），缺省 agent。
+                        # 落沙走 txt 追加（SandglassVaultAdapter.store），fail-open 不阻塞。
+                        try:
+                            sand_sender = sender if sender not in ("", "unknown") else "agent"
+                            if llm_output and llm_output.strip():
+                                from interfaces.adapters.sandglass_vault_adapter import SandglassVaultAdapter
+                                from interfaces.models import MemoryItem
+                                _sa = SandglassVaultAdapter()
+                                _ok = _sa.store(MemoryItem(
+                                    text=llm_output[:2000],
+                                    origin=sand_sender,
+                                    system="sandglass")) if _sa else False
+                                logger.info("[glue] /store-turn 落沙 sender=%s ok=%s", sand_sender, _ok)
+                        except Exception as _e:
+                            logger.warning("[glue] /store-turn 落沙失败（fail-open）: %s", _e)
                         self._send(200, data)
                     except urllib.error.HTTPError as e:
                         # 429/503/422/400 → 透传状态码＋Retry-After（插件不重试，
