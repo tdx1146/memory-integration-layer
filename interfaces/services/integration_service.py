@@ -556,6 +556,37 @@ class IntegratedMemoryService:
             degraded = bool(getattr(self.monument, "degraded", False))
             status["monument"] = {"degraded": degraded}
 
+        # 部署完整性检查（2026-08-28 dandan 拍板：光沙漏不完整，必须见 LMS 塑形）
+        # 三通道：沙漏回忆 / LMS 塑形(self_ref) / 右脑重体验(tag=重体验)
+        # 缺任一 → complete=false，防止后来者自以为部署成功。
+        try:
+            sg_ok = bool(status.get("sandglass", {}).get("healthy"))
+            lms_ok = bool(status.get("lms", {}).get("healthy"))
+            # LMS 塑形是否真的有内容（self_ref voice 非空）
+            sr = self.get_self_ref_voice(limit=1) if self.lms is not None else []
+            self_ref_ok = bool(sr)
+            # 右脑重体验：沙漏里是否有 tag=重体验 条目
+            replay_ok = False
+            if self.sandglass is not None:
+                try:
+                    recent = getattr(self.sandglass, "recent", None)
+                    if recent is not None:
+                        replay_ok = any("重体验" in (getattr(i, "text", "") or "") for i in recent(20))
+                except Exception:
+                    replay_ok = False
+            status["completeness"] = {
+                "channels": {
+                    "sandglass": sg_ok,
+                    "lms_self_ref": self_ref_ok,
+                    "right_brain_replay": replay_ok,
+                },
+                # ponytail: 简化为"三通道都健康才算完整"，含右脑重体验为可选增强
+                "complete": sg_ok and lms_ok and self_ref_ok,
+                "note": "光沙漏不完整——必须见 LMS 塑形(self_ref)才算部署完整；右脑重体验为增强项",
+            }
+        except Exception as e:  # pragma: no cover
+            status["completeness"] = {"complete": False, "error": str(e)}
+
         return status
 
     # ------------------------------------------------------------------
