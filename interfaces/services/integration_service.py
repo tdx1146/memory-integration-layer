@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 from collections import deque
 from typing import Any, Dict, List, Optional
@@ -610,25 +611,29 @@ class IntegratedMemoryService:
 
         激进注入模式（插件 LMS_MEMORY_INJECT_MODE=replay）的注入源：
         右脑 0.8B 第一人称重构版记忆，**替代原文注入**（设计遗嘱的开关翻开）。
-        复用 self.sandglass.recent()（/soul 同款）；无重体验条目 → []（fail-open）。
-        ponytail: 过滤即"text 含重体验"，与 completeness 检查同款判断；不新造沙漏读接口。
+        直接读官方沙漏 txt 尾部（NEXSANDBASE_HOME 固定）过滤"重体验"——2026-08-28
+        发现 sandglass_vault.recent() 在多行记录/文件尾无换行时解析错位（外部项目 bug 不改），
+        故绕过 recent 自读尾部。记录首行含"【重体验】"（内容行不含），天然跳过多行正文。
         """
-        if self.sandglass is None:
-            return []
-        rec = getattr(self.sandglass, "recent", None)
-        if not callable(rec):
-            return []
+        nb = os.environ.get("NEXSANDBASE_HOME") or "/vol2/1000/AI专用/所有自动化/轻如烟/sandglass"
+        path = os.path.join(nb, "sandglass.txt")
         try:
-            items = rec(30) or []
+            with open(path, "rb") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                f.seek(max(0, size - 8192))
+                chunk = f.read().decode("utf-8", errors="ignore")
         except Exception as e:  # pragma: no cover
             logger.warning("右脑重体验读取失败: %s", e)
             return []
-        out = []
-        for it in items:
-            text = (getattr(it, "text", "") or "").strip()
-            if "重体验" not in text:
+        out, seen = [], set()
+        for line in reversed([l.strip() for l in chunk.splitlines() if l.strip()]):
+            if "【重体验】" not in line:
                 continue
-            out.append({"text": text[:300], "ts": getattr(it, "created_at", None)})
+            if line in seen:  # 同文本去重（沙漏存在重复写入）
+                continue
+            seen.add(line)
+            out.append({"text": line[:300], "ts": None})
             if len(out) >= limit:
                 break
         return out
