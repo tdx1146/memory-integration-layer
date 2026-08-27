@@ -143,6 +143,10 @@ class GlueHandler(BaseHTTPRequestHandler):
             svc = ensure_service()
             st = svc.get_status()
             self._send(200, {"status": "ok", "service": "glue-layer", "backends": st, "ts": time.time()})
+        elif path == "/surprise-stats":
+            # 档2 右脑触发判据的只读统计源（阶段2规格 §1）：surprise 窗口 {n, mean, std, cold}
+            svc = ensure_service()
+            self._send(200, {"status": "ok", "stats": svc.get_surprise_stats(), "ts": time.time()})
         else:
             self._send(404, {"error": "not found"})
 

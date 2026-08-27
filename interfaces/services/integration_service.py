@@ -589,6 +589,22 @@ class IntegratedMemoryService:
 
         return status
 
+    def get_surprise_stats(self) -> Dict[str, Any]:
+        """档2 右脑重构触发判据的只读统计源（阶段2规格 §1.2/1.3）。
+
+        只读复用最近 200 条 surprise 窗口（recall 时 append，L315），不改变窗口状态。
+        返回 {n, mean, std, cold}：n<30 → cold=True（不自动触发，冷启动第一层）。
+        ponytail: 右脑判据不重复造窗口，直接消费本端点；天花板：mean/std 为朴素统计，
+        surprise 右偏重尾，正式阈值用 z-score 越带（σ 兜底 1e-8 同 AllostaticJController）。
+        """
+        w = list(self._recent_surprises)
+        n = len(w)
+        if n == 0:
+            return {"n": 0, "mean": None, "std": None, "cold": True}
+        mean = sum(w) / n
+        std = (sum((v - mean) ** 2 for v in w) / n) ** 0.5 if n >= 2 else 0.0
+        return {"n": n, "mean": round(mean, 4), "std": round(std, 4), "cold": n < 30}
+
     # ------------------------------------------------------------------
     # 工具方法（纯函数，便于单测）
     # ------------------------------------------------------------------
