@@ -178,6 +178,7 @@ class GlueHandler(BaseHTTPRequestHandler):
                     "count": len(result),
                     "results": result,
                     "self_ref": svc.get_self_ref_voice(),
+                    "replay_recent": svc.get_replay_recent(),  # 右脑重体验层（激进注入模式源）
                 })
 
             elif path == "/react":

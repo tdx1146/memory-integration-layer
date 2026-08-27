@@ -605,6 +605,34 @@ class IntegratedMemoryService:
         std = (sum((v - mean) ** 2 for v in w) / n) ** 0.5 if n >= 2 else 0.0
         return {"n": n, "mean": round(mean, 4), "std": round(std, 4), "cold": n < 30}
 
+    def get_replay_recent(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """右脑重体验层最近条目（沙漏 tag=重体验，档2 异步重构产物）。
+
+        激进注入模式（插件 LMS_MEMORY_INJECT_MODE=replay）的注入源：
+        右脑 0.8B 第一人称重构版记忆，**替代原文注入**（设计遗嘱的开关翻开）。
+        复用 self.sandglass.recent()（/soul 同款）；无重体验条目 → []（fail-open）。
+        ponytail: 过滤即"text 含重体验"，与 completeness 检查同款判断；不新造沙漏读接口。
+        """
+        if self.sandglass is None:
+            return []
+        rec = getattr(self.sandglass, "recent", None)
+        if not callable(rec):
+            return []
+        try:
+            items = rec(30) or []
+        except Exception as e:  # pragma: no cover
+            logger.warning("右脑重体验读取失败: %s", e)
+            return []
+        out = []
+        for it in items:
+            text = (getattr(it, "text", "") or "").strip()
+            if "重体验" not in text:
+                continue
+            out.append({"text": text[:300], "ts": getattr(it, "created_at", None)})
+            if len(out) >= limit:
+                break
+        return out
+
     # ------------------------------------------------------------------
     # 工具方法（纯函数，便于单测）
     # ------------------------------------------------------------------
