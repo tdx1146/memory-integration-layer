@@ -588,7 +588,58 @@ class IntegratedMemoryService:
         except Exception as e:  # pragma: no cover
             status["completeness"] = {"complete": False, "error": str(e)}
 
+        # 部署完整性 6 线体检（2026-08-29 dandan 拍板：门禁长在胶水层，防瞎改）
+        # 覆盖：明线沙漏 / 暗线LMS / 手机embed(11435) / 手机llm(11436) / 做梦防护 / 小脑cron
+        status["deployment"] = self._deployment_health()
+
         return status
+
+    def _deployment_health(self) -> Dict[str, Any]:
+        """6 线部署体检：任一 FAIL 则 complete=false（部署即失败，错误暴露在启动前/运行中）。"""
+        import socket
+
+        def port_open(host: str, port: int) -> bool:
+            try:
+                with socket.create_connection((host, port), timeout=3):
+                    return True
+            except Exception:
+                return False
+
+        # 1. 手机 embed（LMS 命脉）
+        phone_embed = port_open("192.168.0.103", 11435)
+        # 2. 手机 llm（右脑/小脑）
+        phone_llm = port_open("192.168.0.103", 11436)
+        # 3. 做梦防护：.env 有 DREAM_IDLE_THRESHOLD（防快照风暴，2026-08-28 事故）
+        env_path = "/vol2/1000/AI专用/living-memory-system-cloud/.env"
+        dream_guard = False
+        try:
+            with open(env_path, encoding="utf-8") as f:
+                dream_guard = "DREAM_IDLE_THRESHOLD=" in f.read()
+        except Exception:
+            dream_guard = False
+        # 4. 小脑 cron：crontab 有 cerebellum_router / watchdog_services
+        cere_cron = False
+        try:
+            import subprocess
+            cr = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5)
+            cere_cron = ("cerebellum_router" in cr.stdout) and ("watchdog_services" in cr.stdout)
+        except Exception:
+            cere_cron = False
+        # 5/6. 沙漏/LMS 已有（completeness 里）
+
+        channels = {
+            "sandglass": bool(status_sg := self.sandglass is not None),
+            "lms_self_ref": bool(status_sr := (self.get_self_ref_voice(limit=1) if self.lms is not None else [])),
+            "phone_embed_11435": phone_embed,
+            "phone_llm_11436": phone_llm,
+            "dream_guard": dream_guard,
+            "cerebellum_cron": cere_cron,
+        }
+        return {
+            "channels": channels,
+            "complete": all(channels.values()),
+            "note": "6 线部署体检：手机双服务是 LMS/右脑/小脑命脉；dream_guard 防快照风暴；cerebellum_cron 保自动化",
+        }
 
     def get_surprise_stats(self) -> Dict[str, Any]:
         """档2 右脑重构触发判据的只读统计源（阶段2规格 §1.2/1.3）。
